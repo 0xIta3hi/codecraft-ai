@@ -1,0 +1,172 @@
+name: AI Code Assistant
+
+# Trigger on comments and review comments, allowing for a chatops-style interaction
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+# Only allow one workflow run at a time per issue/PR
+concurrency:
+  group: code-assistant-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  # Job 1: Filter and validate the request
+  filter:
+    name: Filter Request
+    runs-on: ubuntu-latest
+    
+    # CRITICAL: Prevent the bot from triggering itself recursively
+    if: github.event.sender.type != 'Bot'
+
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+      command: ${{ steps.check.outputs.command }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Check if bot should run and parse command
+        id: check
+        run: |
+          # The comment body might be in different places depending on the event
+          COMMENT="${{ github.event.comment.body || github.event.issue.body }}"
+          
+          # Initialize outputs to false/empty
+          echo "should_run=false" >> $GITHUB_OUTPUT
+          echo "command=" >> $GITHUB_OUTPUT
+          
+          # Check for @code-assistant mention
+          if echo "$COMMENT" | grep -q "@code-assistant"; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            
+            # Use case commands
+            if echo "$COMMENT" | grep -q "@code-assistant fix"; then
+              echo "command=fix" >> $GITHUB_OUTPUT
+            elif echo "$COMMENT" | grep -q "@code-assistant implement"; then
+              echo "command=implement" >> $GITHUB_OUTPUT
+            elif echo "$COMMENT" | grep -q "@code-assistant review"; then
+              echo "command=review" >> $GITHUB_OUTPUT
+            elif echo "$COMMENT" | grep -q "@code-assistant test"; then
+              echo "command=test" >> $GITHUB_OUTPUT
+            else
+              # Default command if mentioned without a specific task
+              echo "command=help" >> $GITHUB_OUTPUT
+            fi
+          fi
+          
+      - name: Authorize User (Optional, but shows security awareness)
+        # We assume authorization checking will be handled inside main.py 
+        # using PyGithub for cleaner code, but you can keep the curl check if preferred.
+        run: echo "Authorization check deferred to main.py"
+
+
+  # Job 2: Run the AI agent pipeline
+  run-agent:
+    name: Run AI Code Assistant
+    runs-on: ubuntu-latest
+    needs: filter
+    
+    # Only run if Job 1 determined a valid command was given by a human user
+    if: needs.filter.outputs.should_run == 'true'
+    
+    timeout-minutes: 30
+    
+    # Grant WRITE permission for content (necessary for the PUSH)
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Use the custom token for push access (generated PAT)
+          token: ${{ secrets.PAT_FOR_PUSH }} 
+          fetch-depth: 0 # Full history needed for git operations
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Post initial status comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // This grabs the issue/PR number based on the event type
+            const issue_number = context.issue.number || context.payload.pull_request.number;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue_number,
+              body: '🤖 **AI Code Assistant is working on this...** ⏳\n\n_This may take up to a few minutes to complete._'
+            });
+          
+      - name: Run Agent Pipeline
+        # Pass all context and the CRITICAL PAT_FOR_PUSH token
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.PAT_FOR_PUSH }} # The token used for PUSH commands
+          COMMAND: ${{ needs.filter.outputs.command }}
+          # Pass the issue/PR number, handling the case where it might be null
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }} 
+          REPO_FULL_NAME: ${{ github.repository }}
+          # Pass the author of the comment/issue who triggered the run (for memory/auth checks)
+          TRIGGER_USER: ${{ github.event.comment.user.login || github.event.issue.user.login }}
+        run: 
+          # Execute the main orchestrator script
+          python src/main.py
+
+      - name: Upload logs as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 7
+          
+      - name: Post final comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const issue_number = context.issue.number || context.payload.pull_request.number;
+            let output = '❌ **AI Code Assistant failed** to complete the task. Check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.';
+            
+            // Try to read the structured output file created by main.py
+            if (fs.existsSync('output.json')) {
+              const data = JSON.parse(fs.readFileSync('output.json', 'utf8'));
+              output = `✅ **AI Code Assistant Results**\n\n${data.summary}\n\n`;
+              
+              if (data.pr_url) {
+                output += `📝 **Pull Request** created with fix: ${data.pr_url}\n`;
+              }
+              
+              if (data.tests_generated) {
+                output += `🧪 **Tests Generated**: ${data.tests_generated}\n`;
+              }
+              
+              if (data.issues_found) {
+                output += `⚠️ **Issues Found**: ${data.issues_found}\n`;
+              }
+              
+              output += `\n_Please review the results and merge if satisfactory._`
+            }
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue_number,
+              body: output
+            });
