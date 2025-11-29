@@ -493,7 +493,7 @@ class Orchestrator:
 
             api_key = os.getenv("GEMINI_API_KEY")
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-1.5-pro")
+            model = genai.GenerativeModel("gemini-2.0-flash")
 
             prompt = f"""
             Analyze this pull request diff and the changed files.
@@ -518,7 +518,7 @@ class Orchestrator:
             return {
                 "summary": analysis_text[:500],
                 "full_analysis": analysis_text,
-                "model": "gemini-1.5-pro",
+                "model": "gemini-2.0-flash",
                 "usage": {
                     "input_tokens": response.usage_metadata.prompt_token_count,
                     "output_tokens": response.usage_metadata.candidates_token_count
@@ -540,7 +540,7 @@ class Orchestrator:
 
             api_key = os.getenv("GEMINI_API_KEY")
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-1.5-pro")
+            model = genai.GenerativeModel("gemini-2.0-flash")
 
             prompt = f"""
             Perform a code review on this pull request.
@@ -587,7 +587,7 @@ class Orchestrator:
 
             api_key = os.getenv("GEMINI_API_KEY")
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-1.5-pro")
+            model = genai.GenerativeModel("gemini-2.0-flash")
 
             prompt = f"""
             Based on this code analysis and diff, generate specific fixes.
