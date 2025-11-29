@@ -153,7 +153,7 @@ class Orchestrator:
 
     def handle_fix_command(self, context: ExecutionContext) -> ExecutionResult:
         """
-        Handle 'fix' command: Analyze PR and apply fixes.
+        Handle 'fix' command: Analyze PR, apply fixes, and verify with tests.
 
         Args:
             context: Execution context
@@ -166,17 +166,35 @@ class Orchestrator:
 
         try:
             from src.utils.github_helper import GitHubAPIWrapper
+            from src.agents.writer import WriterAgent
 
             github = GitHubAPIWrapper()
+            writer = WriterAgent()
             output = {}
 
-            # Step 1: Fetch PR details
-            self.logger.info("Step 1: Fetching PR details")
+            # Step 1: Check if it's a PR
+            self.logger.info("Step 1: Verifying PR exists")
             pr_details = github.fetch_pr_details(
                 context.owner,
                 context.repo,
                 context.pr_number
             )
+            if not pr_details or not pr_details.get("id"):
+                self.logger.warning("Not a valid PR")
+                comment = f"❌ PR #{context.pr_number} does not exist or is not accessible."
+                github.post_comment(context.owner, context.repo, context.pr_number, comment)
+                output["pr_valid"] = False
+                output["comment"] = comment
+
+                return ExecutionResult(
+                    success=False,
+                    command="fix",
+                    output=output,
+                    error="Invalid or inaccessible PR",
+                    duration_seconds=(datetime.now() - start_time).total_seconds()
+                )
+
+            output["pr_valid"] = True
             output["pr_details"] = pr_details
 
             # Step 2: Fetch PR diff
@@ -188,6 +206,22 @@ class Orchestrator:
             )
             output["diff_size"] = len(pr_diff)
 
+            # Step 2.5: Check if diff is empty
+            if not pr_diff or pr_diff.strip() == "":
+                self.logger.warning("PR diff is empty")
+                comment = "📝 No changes detected in this PR. Nothing to fix."
+                github.post_comment(context.owner, context.repo, context.pr_number, comment)
+                output["diff_empty"] = True
+                output["comment"] = comment
+
+                return ExecutionResult(
+                    success=False,
+                    command="fix",
+                    output=output,
+                    error="Empty PR diff",
+                    duration_seconds=(datetime.now() - start_time).total_seconds()
+                )
+
             # Step 3: Get changed files
             self.logger.info("Step 3: Getting changed files")
             changed_files = github.get_pr_files(
@@ -197,42 +231,110 @@ class Orchestrator:
             )
             output["changed_files"] = changed_files
 
-            # Step 4: Analyze code with Claude
-            self.logger.info("Step 4: Analyzing code with Claude")
-            analysis = self._analyze_code_with_claude(pr_diff, changed_files)
-            output["analysis"] = analysis
-
-            # Step 5: Generate fixes
-            self.logger.info("Step 5: Generating fixes")
-            fixes = self._generate_fixes(analysis, pr_diff)
-            output["fixes_generated"] = len(fixes)
+            # Step 4: Analyze and generate fixes
+            self.logger.info("Step 4: Analyzing and generating fixes")
+            fixes = writer.analyze_and_fix(pr_diff)
+            output["fixes_found"] = len(fixes) > 0
             output["fixes"] = fixes
 
-            # Step 6: Apply fixes and push (unless dry-run)
-            if not context.dry_run:
-                self.logger.info("Step 6: Applying fixes and pushing to PR")
-                push_result = github.push_fix_to_pr(
-                    owner=context.owner,
-                    repo=context.repo,
-                    pr_number=context.pr_number,
-                    repo_path=context.repo_path,
-                    commit_message="Apply AI-generated fixes"
-                )
-                output["push_result"] = push_result
+            if not fixes:
+                self.logger.warning("No fixes found")
+                comment = "✅ Code analysis complete. No issues found that require fixing."
+                github.post_comment(context.owner, context.repo, context.pr_number, comment)
+                output["comment"] = comment
 
-                # Step 7: Post summary comment
-                self.logger.info("Step 7: Posting summary comment")
-                comment = self._generate_fix_summary_comment(analysis, fixes)
-                comment_result = github.post_comment(
-                    context.owner,
-                    context.repo,
-                    context.pr_number,
-                    comment
+                return ExecutionResult(
+                    success=True,
+                    command="fix",
+                    output=output,
+                    duration_seconds=(datetime.now() - start_time).total_seconds()
                 )
-                output["comment_posted"] = comment_result
-            else:
-                self.logger.info("Dry-run mode: Skipping push and comment")
-                output["dry_run"] = True
+
+            # Step 5: Apply fixes and verify
+            self.logger.info("Step 5: Applying fixes and verifying with tests")
+            all_fixes_successful = True
+            successful_fixes = []
+            failed_fixes = []
+
+            for fix in fixes:
+                file_path = fix.get("file_path")
+                new_code = fix.get("new_code")
+
+                self.logger.info("Applying fix", file=file_path)
+                verify_success, error_logs = writer.apply_fix_and_verify(file_path, new_code)
+
+                if verify_success:
+                    self.logger.info("Fix verified successfully", file=file_path)
+                    successful_fixes.append(fix)
+                else:
+                    self.logger.warning("Fix verification failed", file=file_path, error=error_logs)
+                    all_fixes_successful = False
+                    failed_fixes.append({
+                        "file": file_path,
+                        "error": error_logs,
+                        "fix": fix
+                    })
+
+            # Step 6: Push successful fixes (if any)
+            if successful_fixes and not context.dry_run:
+                self.logger.info("Step 6: Pushing verified fixes")
+                pr_branch = pr_details.get("head", {}).get("ref")
+
+                if pr_branch:
+                    try:
+                        push_result = github.push_file(
+                            context.owner,
+                            context.repo,
+                            pr_branch,
+                            context.repo_path,
+                            "Apply AI-verified fixes"
+                        )
+                        output["push_result"] = push_result
+                        output["fixes_pushed"] = len(successful_fixes)
+
+                        # Step 7: Post success comment
+                        self.logger.info("Step 7: Posting success comment")
+                        success_comment = (
+                            f"✅ **AI Fix Applied Successfully**\n\n"
+                            f"Applied {len(successful_fixes)} fix(es) to {', '.join([f['file_path'] for f in successful_fixes])}\n\n"
+                            f"All tests passed!"
+                        )
+                        github.post_comment(context.owner, context.repo, context.pr_number, success_comment)
+                        output["comment"] = success_comment
+                        output["fix_status"] = "success"
+
+                    except Exception as push_error:
+                        self.logger.error("Push failed", error=str(push_error))
+                        output["push_error"] = str(push_error)
+
+            # Step 8: Post failure comment for failed fixes
+            if failed_fixes:
+                self.logger.warning(f"Step 8: {len(failed_fixes)} fix(es) failed verification")
+                failure_details = "### 🚨 Fix Verification Failed\n\nThe following fixes failed test verification:\n\n"
+
+                for failed in failed_fixes:
+                    failure_details += f"**File:** `{failed['file']}`\n\n"
+                    failure_details += "**Test Output:**\n```\n"
+                    failure_details += failed['error'] if failed['error'] else "Unknown error"
+                    failure_details += "\n```\n\n"
+
+                failure_comment = (
+                    f"❌ **AI Fix Failed Verification**\n\n"
+                    f"{failure_details}\n"
+                    f"Failed fixes were **not applied** and code was reverted to original state."
+                )
+                github.post_comment(context.owner, context.repo, context.pr_number, failure_comment)
+                output["comment"] = failure_comment
+                output["fix_status"] = "failed_verification"
+
+            if not successful_fixes and failed_fixes:
+                return ExecutionResult(
+                    success=False,
+                    command="fix",
+                    output=output,
+                    error="All fixes failed verification",
+                    duration_seconds=(datetime.now() - start_time).total_seconds()
+                )
 
             duration = (datetime.now() - start_time).total_seconds()
             return ExecutionResult(

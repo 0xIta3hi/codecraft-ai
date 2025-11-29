@@ -5,8 +5,9 @@ WriterAgent - Handles code writing, testing, and verification
 import os
 import subprocess
 import structlog
+import google.generativeai as genai
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List, Dict, Any
 
 logger = structlog.get_logger(__name__)
 
@@ -17,6 +18,71 @@ class WriterAgent:
     def __init__(self):
         """Initialize WriterAgent"""
         self.logger = structlog.get_logger(self.__class__.__name__)
+        
+        # Initialize Gemini API
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        if gemini_api_key:
+            genai.configure(api_key=gemini_api_key)
+    
+    def analyze_and_fix(self, pr_diff: str) -> List[Dict[str, Any]]:
+        """
+        Analyze PR diff and generate fixes.
+
+        Args:
+            pr_diff: Git diff content
+
+        Returns:
+            List of fixes with file_path and new_code
+        """
+        if not pr_diff or pr_diff.strip() == "":
+            self.logger.warning("Empty diff provided")
+            return []
+
+        try:
+            prompt = f"""Analyze the following git diff and identify any code issues, bugs, or improvements.
+For each issue found, provide the fix in a structured format.
+
+GIT DIFF:
+{pr_diff}
+
+Please respond in the following JSON format ONLY:
+[
+    {{
+        "issue": "Description of the issue",
+        "file_path": "path/to/file.py",
+        "new_code": "The corrected code snippet"
+    }}
+]
+
+If no issues are found, return an empty array: []
+Only return valid JSON, no other text."""
+
+            self.logger.info("Analyzing diff with Gemini")
+            model = genai.GenerativeModel("gemini-2.0-flash")
+            response = model.generate_content(prompt)
+            
+            # Parse response
+            response_text = response.text.strip()
+            
+            # Extract JSON from response (handle markdown code blocks)
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+            
+            import json
+            fixes = json.loads(response_text)
+            
+            if not isinstance(fixes, list):
+                self.logger.warning("Invalid response format from Gemini")
+                return []
+            
+            self.logger.info("Fixes generated", count=len(fixes))
+            return fixes
+
+        except Exception as e:
+            self.logger.error("Failed to analyze and fix", error=str(e))
+            return []
 
     def apply_fix_and_verify(self, file_path: str, new_code: str) -> Tuple[bool, Optional[str]]:
         """
