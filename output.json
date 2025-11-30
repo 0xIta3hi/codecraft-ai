@@ -1,8 +1,8 @@
 {
-  "timestamp": "2025-11-30T10:55:01.176273",
+  "timestamp": "2025-11-30T11:08:05.207062",
   "results": [
     {
-      "success": true,
+      "success": false,
       "command": "fix",
       "output": {
         "pr_valid": true,
@@ -13,7 +13,7 @@
           "state": "open",
           "author": "0xIta3hi",
           "created_at": "2025-11-30T04:25:02+00:00",
-          "updated_at": "2025-11-30T05:23:34+00:00",
+          "updated_at": "2025-11-30T05:35:48+00:00",
           "head_ref": "master",
           "base_ref": "test-feature",
           "commits": 1,
@@ -75,14 +75,31 @@
             "patch": "@@ -0,0 +1,80 @@\n+\"\"\"\n+test_shell_executor.py - Test suite for shell_executor.py\n+\n+Tests file operation functions with security validation.\n+Tests WILL FAIL or expose vulnerabilities with the current buggy code.\n+\"\"\"\n+\n+import pytest\n+import tempfile\n+import os\n+from pathlib import Path\n+from shell_executor import execute_file_operation, get_file_info\n+\n+\n+@pytest.fixture\n+def temp_file():\n+    \"\"\"Create a temporary test file.\"\"\"\n+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:\n+        f.write(\"test content\")\n+        temp_path = f.name\n+    yield temp_path\n+    # Cleanup\n+    if os.path.exists(temp_path):\n+        os.remove(temp_path)\n+    backup_path = f\"{temp_path}.backup\"\n+    if os.path.exists(backup_path):\n+        os.remove(backup_path)\n+\n+\n+def test_execute_file_operation_copy(temp_file):\n+    \"\"\"Test that file copy operation works correctly.\"\"\"\n+    result = execute_file_operation(\"copy\", temp_file)\n+    # After copy, backup file should exist\n+    backup_path = f\"{temp_file}.backup\"\n+    assert os.path.exists(backup_path), \"Backup file should be created\"\n+\n+\n+def test_execute_file_operation_sanitized_input(temp_file):\n+    \"\"\"Test that filenames with special characters are handled safely.\"\"\"\n+    # This test validates that dangerous characters don't execute\n+    # With unsanitized input, this could execute arbitrary commands\n+    malicious_filename = f\"{temp_file}' & echo 'INJECTION'\"\n+    \n+    # Attempting injection should fail gracefully or be blocked\n+    with pytest.raises((FileNotFoundError, OSError)):\n+        execute_file_operation(\"copy\", malicious_filename)\n+\n+\n+def test_get_file_info_requires_sanitization(temp_file):\n+    \"\"\"Test that file info function properly sanitizes input.\"\"\"\n+    # Current code is vulnerable to injection\n+    # Safe code should handle or reject special characters\n+    \n+    # This should work with legitimate filenames\n+    result = get_file_info(temp_file)\n+    assert len(result) > 0, \"File info should be returned for valid file\"\n+    \n+    # Test with injection attempt\n+    malicious_input = f\"{temp_file}'; cmd /c calc; echo '\"\n+    # Should either handle gracefully or raise an error\n+    with pytest.raises((FileNotFoundError, OSError, ValueError)):\n+        get_file_info(malicious_input)\n+\n+\n+def test_execute_file_operation_with_spaces_in_filename(temp_file):\n+    \"\"\"Test that filenames with spaces are handled correctly.\"\"\"\n+    # Create a file with spaces in the name\n+    spaces_file = temp_file.replace('.txt', ' with spaces.txt')\n+    with open(spaces_file, 'w') as f:\n+        f.write(\"test\")\n+    \n+    try:\n+        # Should handle spaces correctly\n+        result = execute_file_operation(\"copy\", spaces_file)\n+        assert os.path.exists(f\"{spaces_file}.backup\")\n+    finally:\n+        if os.path.exists(spaces_file):\n+            os.remove(spaces_file)\n+        if os.path.exists(f\"{spaces_file}.backup\"):\n+            os.remove(f\"{spaces_file}.backup\")"
           }
         ],
-        "fixes_found": false,
-        "fixes": [],
-        "comment": "\u2705 Code analysis complete. No issues found that require fixing."
+        "fixes_found": true,
+        "fixes": [
+          {
+            "file_path": "calc.py",
+            "new_code": "def calculate_average(numbers):\n    \"\"\"\n    Calculate the average of a list of numbers.\n    \n    Args:\n        numbers: A list of numeric values\n        \n    Returns:\n        The average of the numbers as a float\n        Returns 0.0 if the list is empty\n    \"\"\"\n    if not numbers:\n        return 0.0\n    total = sum(numbers)\n    count = len(numbers)\n    return total / count",
+            "issue": "Fixed division by zero"
+          },
+          {
+            "file_path": "list_processor.py",
+            "new_code": "def remove_duplicates_preserve_order(items):\n    \"\"\"\n    Remove duplicate items from a list while preserving order.\n    \n    Args:\n        items: A list of items\n        \n    Returns:\n        A new list with duplicates removed, order preserved\n    \"\"\"\n    seen = set()\n    result = []\n    \n    for i in range(len(items)):\n        item = items[i]\n        if item not in seen:\n            seen.add(item)\n            result.append(item)\n    \n    return result\n\ndef calculate_moving_average(values, window_size):\n    \"\"\"\n    Calculate moving average of a list with a given window size.\n    \n    Args:\n        values: List of numeric values\n        window_size: Size of the moving window\n        \n    Returns:\n        List of moving averages\n    \"\"\"\n    if window_size <= 0 or window_size > len(values):\n        raise ValueError(\"Invalid window size\")\n    \n    averages = []\n    \n    for i in range(len(values) - window_size + 1):\n        window = values[i:i + window_size]\n        avg = sum(window) / len(window)\n        averages.append(avg)\n    \n    return averages\n\ndef extract_subsequence(sequence, start, end):\n    \"\"\"\n    Extract a subsequence from a list using start and end indices.\n    \n    Args:\n        sequence: The source list\n        start: Start index (inclusive)\n        end: End index (should be inclusive in this API)\n        \n    Returns:\n        The subsequence from start to end (inclusive)\n    \"\"\"\n    return sequence[start:end+1]",
+            "issue": "Fixed off-by-one errors"
+          },
+          {
+            "file_path": "shell_executor.py",
+            "new_code": "import subprocess\nimport shlex\n\ndef execute_file_operation(operation, filename):\n    \"\"\"\n    Execute a file operation (copy, delete, list) on a specified file.\n    \n    Args:\n        operation: The operation to perform ('copy', 'delete', 'list')\n        filename: The target filename (SANITIZED!)\n        \n    Returns:\n        The output of the command as a string\n        \n    Security Issue: User input is sanitized to prevent command injection.\n    \"\"\"\n    filename = shlex.quote(filename)\n    if operation == \"copy\":\n        cmd = [\"copy\", filename, filename + \".backup\"]\n    elif operation == \"delete\":\n        cmd = [\"del\", filename]\n    elif operation == \"list\":\n        cmd = [\"dir\", filename]\n    else:\n        raise ValueError(f\"Unknown operation: {operation}\")\n    \n    result = subprocess.run(cmd, capture_output=True, text=True, shell=False)\n    return result.stdout\n\n\ndef get_file_info(filename):\n    \"\"\"\n    Retrieve file information using shell command.\n    \n    Args:\n        filename: The file to get info on (SANITIZED!)\n        \n    Returns:\n        File information as a string\n        \n    Security Issue: User input is sanitized to prevent command injection.\n    \"\"\"\n    filename = shlex.quote(filename)\n    cmd = [\"powershell\", \"-Command\", f\"Get-Item '{filename}' | Select-Object FullName, Length\"]\n    result = subprocess.run(cmd, capture_output=True, text=True, shell=False)\n    return result.stdout",
+            "issue": "Sanitized shell commands to prevent command injection"
+          }
+        ],
+        "comment": "\u274c **AI Fix Failed Verification**\n\n### \ud83d\udea8 Fix Verification Failed\n\nThe following fixes failed test verification:\n\n**File:** `calc.py`\n\n**Test Output:**\n```\nUnknown error\n```\n\n**File:** `list_processor.py`\n\n**Test Output:**\n```\nUnknown error\n```\n\n**File:** `shell_executor.py`\n\n**Test Output:**\n```\nUnknown error\n```\n\n\nFailed fixes were **not applied** and code was reverted to original state.",
+        "fix_status": "failed_verification"
       },
-      "error": null,
-      "timestamp": "2025-11-30T10:55:01.175912",
-      "duration_seconds": 14.022483
+      "error": "All fixes failed verification",
+      "timestamp": "2025-11-30T11:08:05.206665",
+      "duration_seconds": 36.700271
     }
   ],
-  "final_status": "success"
+  "final_status": "failure"
 }

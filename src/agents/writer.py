@@ -7,6 +7,7 @@ import json
 import subprocess
 import structlog
 import google.generativeai as genai
+import base64
 from pathlib import Path
 from typing import Tuple, Optional, List, Dict, Any
 
@@ -70,83 +71,45 @@ class WriterAgent:
                         except Exception as e:
                             self.logger.warning(f"Could not read {filename}: {e}")
             
-            prompt = f"""You are an expert Python developer. Fix ALL bugs in these files.
+            prompt = f"""You are a Python Code Repair Agent. Your task is to fix bugs in the provided source code.
 
-BUGGY SOURCE FILES:
+INPUT CONTEXT - COMPLETE BUGGY FILES:
 {file_context}
 
-YOU MUST:
-1. Return COMPLETE, WORKING fixed code for each file
-2. Escape newlines as \\n in JSON strings (do NOT include actual newlines)
-3. Fix EVERY bug listed in comments and test descriptions
-4. Return empty array [] if no bugs found
+CRITICAL INSTRUCTIONS:
+1. Return ONLY a valid JSON Array - NO markdown, NO code blocks, NO explanations.
+2. The 'new_code' field must contain the COMPLETE fixed file from start to end.
+3. Use \\n for newlines (two characters: backslash and 'n'), NOT actual line breaks.
+4. Every single bug mentioned below MUST be fixed.
+5. The fixed code must make ALL tests pass.
 
-BUGS TO FIX:
-- calc.py: Handle empty list in calculate_average (return 0.0, don't divide by zero)
-- list_processor.py: Fix off-by-one errors in range() calls
-  * remove_duplicates_preserve_order: use range(len(items)) not range(len(items)-1)
-  * calculate_moving_average: use range(len(values) - window_size + 1) not range(len(values) - window_size)
-  * extract_subsequence: return sequence[start:end+1] for inclusive end, not sequence[start:end]
-- shell_executor.py: Sanitize filenames to prevent command injection
-  * Use shlex.quote() or os.path.basename() to sanitize
-  * Use subprocess.run(..., shell=False) instead of shell=True
+BUGS TO FIX (MANDATORY - DO NOT SKIP):
+- calc.py: Add empty list check at the START of calculate_average. If list is empty, return 0.0 BEFORE dividing.
+- list_processor.py: 
+  * Line with "range(len(items) - 1)" → CHANGE TO "range(len(items))"
+  * Line with "range(len(values) - window_size)" → CHANGE TO "range(len(values) - window_size + 1)"
+  * Line with "sequence[start:end]" → CHANGE TO "sequence[start:end+1]"
+- shell_executor.py: Add "import shlex" at top. Replace all "shell=True" with "shell=False". Sanitize filenames with shlex.quote().
 
-Return ONLY JSON array (single line, no markdown):
-[{{"file_path": "calc.py", "new_code": "complete file with \\n for newlines", "issue": "what was fixed"}}]"""
+JSON OUTPUT (ONLY THIS FORMAT):
+[{{"file_path":"calc.py","new_code":"complete\\npython\\ncode\\nhere","issue":"Fixed bug X"}},{{"file_path":"list_processor.py","new_code":"complete code","issue":"Fixed bugs"}},{{"file_path":"shell_executor.py","new_code":"complete code","issue":"Fixed security"}}]"""
 
-            self.logger.info("Analyzing code with Gemini")
+            self.logger.info("Analyzing code with Gemini (Data Serialization mode)")
             model = genai.GenerativeModel("gemini-2.0-flash")
-            response = model.generate_content(prompt)
+            response = model.generate_content(
+                prompt,
+                generation_config={
+                    "response_mime_type": "application/json",
+                    "temperature": 0.1
+                }
+            )
             
-            # Parse response
+            # Parse response - should be pure JSON with MIME type
             response_text = response.text.strip()
             self.logger.info(f"Gemini response length: {len(response_text)}")
             
-            # CRITICAL: Preprocess to handle Gemini's inconsistent newline escaping
-            # Gemini often returns actual newlines in JSON strings instead of \n
-            # We need to escape them BEFORE json.loads()
-            if response_text.startswith('['):
-                # This looks like a JSON array - let's preprocess it
-                # Strategy: Find quoted strings and escape their actual newlines
-                processed = []
-                in_string = False
-                escape_next = False
-                i = 0
-                
-                while i < len(response_text):
-                    char = response_text[i]
-                    
-                    if escape_next:
-                        processed.append(char)
-                        escape_next = False
-                        i += 1
-                        continue
-                    
-                    if char == '\\':
-                        processed.append(char)
-                        escape_next = True
-                        i += 1
-                        continue
-                    
-                    if char == '"':
-                        in_string = not in_string
-                        processed.append(char)
-                        i += 1
-                        continue
-                    
-                    if char == '\n' and in_string:
-                        # Actual newline inside a string - escape it
-                        processed.append('\\')
-                        processed.append('n')
-                        i += 1
-                        continue
-                    
-                    processed.append(char)
-                    i += 1
-                
-                response_text = ''.join(processed)
-            
-            # Extract JSON
+            # With response_mime_type="application/json", Gemini should return valid JSON
+            # But handle edge cases with markdown formatting
             if "```json" in response_text:
                 response_text = response_text.split("```json")[1].split("```")[0].strip()
             elif "```" in response_text:
@@ -161,39 +124,76 @@ Return ONLY JSON array (single line, no markdown):
                 end_idx = response_text.rfind("]") + 1
                 response_text = response_text[start_idx:end_idx]
             
+            # CRITICAL FIX: Gemini returns actual newlines in JSON string values
+            # Character-by-character parser to escape them properly
+            fixed = []
+            in_string = False
+            escape = False
+            i = 0
+            
+            while i < len(response_text):
+                char = response_text[i]
+                
+                if escape:
+                    fixed.append(char)
+                    escape = False
+                    i += 1
+                    continue
+                
+                if char == '\\':
+                    fixed.append(char)
+                    escape = True
+                    i += 1
+                    continue
+                
+                if char == '"':
+                    in_string = not in_string
+                    fixed.append(char)
+                    i += 1
+                    continue
+                
+                # If we're in a string and hit a literal newline, escape it
+                if in_string and char == '\n':
+                    fixed.append('\\n')
+                    i += 1
+                    continue
+                
+                fixed.append(char)
+                i += 1
+            
+            response_text = ''.join(fixed)
+            
             # Parse JSON
             try:
                 fixes = json.loads(response_text)
+                self.logger.info(f"Successfully parsed JSON with {len(fixes)} fixes")
             except json.JSONDecodeError as e:
                 self.logger.error(f"JSON parse failed: {e}")
-                self.logger.error(f"Response text: {response_text[:300]}")
+                self.logger.error(f"Response text preview: {response_text[:500]}")
                 return []
             
             if not isinstance(fixes, list):
                 self.logger.warning("Response is not a JSON array")
                 return []
             
-            # Unescape JSON string values - convert \\n to actual newlines
+            # Unescape new_code strings: convert \\n to actual newlines
             decoded_fixes = []
             for fix in fixes:
                 try:
                     decoded_fix = {}
                     for key, value in fix.items():
                         if key == "new_code" and isinstance(value, str):
-                            # Unescape: \\n -> newline, \\t -> tab, etc.
-                            decoded_value = value.encode().decode('unicode-escape')
-                            decoded_fix[key] = decoded_value
+                            # Unescape escaped newlines: \\n -> actual \n
+                            decoded_code = value.replace('\\n', '\n').replace('\\t', '\t')
+                            decoded_fix[key] = decoded_code
                         else:
                             decoded_fix[key] = value
                     decoded_fixes.append(decoded_fix)
-                    self.logger.info(f"Processed fix for {fix.get('file_path')}: {len(decoded_fix.get('new_code', ''))} chars")
+                    self.logger.info(f"Unescaped fix for {fix.get('file_path')}: {len(decoded_fix.get('new_code', ''))} chars")
                 except Exception as e:
                     self.logger.error(f"Failed to unescape code for {fix.get('file_path')}: {e}")
             
-            if not decoded_fixes:
-                self.logger.warning("No valid fixes after unescaping")
-            
-            self.logger.info(f"Parsed {len(decoded_fixes)} fixes from response")
+            self.logger.info(f"Returned {len(decoded_fixes)} fixes")
             return decoded_fixes
 
         except Exception as e:
