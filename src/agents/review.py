@@ -48,35 +48,46 @@ class ReviewAgent:
         try:
             files_info = json.dumps(changed_files, indent=2)
             
-            prompt = f"""Perform a detailed code review on this pull request. Analyze for:
-1. Logic issues (bugs, incorrect algorithms, edge cases)
-2. Security vulnerabilities (injection, auth, data exposure)
-3. Style violations (naming, formatting, best practices)
+            prompt = f"""CRITICAL CODE REVIEW: Analyze this PR for ALL possible bugs and flaws. Be AGGRESSIVE in finding issues.
+
+ANALYZE FOR:
+1. LOGICAL BUGS: Incorrect conditions, wrong boolean logic, infinite loops, off-by-one errors, impossible states
+2. DATA FLOW: Uninitialized vars, null dereference, type errors, wrong conversions, data loss
+3. EDGE CASES: Empty inputs, nulls, negative numbers, very large numbers, boundary conditions - what COULD break?
+4. ERROR HANDLING: Missing error checks, silent failures, swallowed exceptions, no validation
+5. ALGORITHM BUGS: Wrong algorithm choice, inefficient implementations, missing base cases
+6. CONCURRENCY: Race conditions, deadlocks, missing locks, wrong synchronization
+7. SECURITY: SQL injection, XSS, auth bypass, data exposure, unsafe deserialization
+8. MEMORY/PERFORMANCE: Leaks, inefficient loops, N+1 problems, large object allocations
+9. API MISUSE: Wrong function calls, incorrect parameter usage, deprecated methods
+10. BUSINESS LOGIC: Does this actually solve the problem? Does it match requirements?
 
 CHANGED FILES:
 {files_info}
 
-GIT DIFF (first 5000 chars):
+GIT DIFF:
 {pr_diff[:5000]}
 
-Respond in JSON format ONLY:
+RESPOND IN THIS JSON FORMAT ONLY:
 {{
-    "summary": "Brief summary of changes",
+    "summary": "What does this PR do and what problems exist?",
     "logic_issues": [
         {{
             "severity": "critical|high|medium|low",
             "file": "filename",
-            "line": "approximate line or range",
-            "issue": "description",
-            "suggestion": "how to fix"
+            "line": "line or range",
+            "issue": "SPECIFIC description - what is wrong and why?",
+            "example": "Show example of the bug",
+            "suggestion": "How to fix it"
         }}
     ],
     "security_issues": [
         {{
-            "severity": "critical|high|medium|low",
+            "severity": "critical|high|medium",
             "file": "filename",
-            "issue": "description",
-            "suggestion": "how to fix"
+            "issue": "Specific vulnerability",
+            "exploit": "How could this be exploited?",
+            "suggestion": "Fix"
         }}
     ],
     "style_issues": [
@@ -84,14 +95,15 @@ Respond in JSON format ONLY:
             "severity": "low|medium",
             "file": "filename",
             "issue": "description",
-            "suggestion": "how to fix"
+            "suggestion": "fix"
         }}
     ],
-    "overall_recommendation": "approve|request_changes",
-    "overall_score": 0-100
+    "edge_cases_at_risk": ["List potential edge cases that could fail"],
+    "overall_recommendation": "approve|request_changes|reject",
+    "overall_score": "0-100: be harsh"
 }}
 
-Return ONLY valid JSON."""
+BE CRITICAL. BE THOROUGH. FIND EVERY BUG. Return ONLY valid JSON."""
 
             self.logger.info("Analyzing code with Gemini")
             model = genai.GenerativeModel("gemini-2.0-flash")
@@ -105,6 +117,12 @@ Return ONLY valid JSON."""
                 response_text = response_text.split("```json")[1].split("```")[0].strip()
             elif "```" in response_text:
                 response_text = response_text.split("```")[1].split("```")[0].strip()
+            
+            # Find JSON object in the response
+            if "{" in response_text and "}" in response_text:
+                start_idx = response_text.find("{")
+                end_idx = response_text.rfind("}") + 1
+                response_text = response_text[start_idx:end_idx]
             
             review_data = json.loads(response_text)
             
@@ -126,12 +144,12 @@ Return ONLY valid JSON."""
             
             return review_data
 
-        except Exception as e:
-            self.logger.error("Code review failed", error=str(e))
+        except json.JSONDecodeError as je:
+            self.logger.error("JSON parsing failed", error=str(je), response_text=response_text[:500] if 'response_text' in locals() else "")
             return {
-                "error": str(e),
+                "error": str(je),
                 "issues": [],
-                "summary": "Review analysis failed",
+                "summary": "Review analysis failed - JSON parsing error",
                 "logic_issues": [],
                 "security_issues": [],
                 "style_issues": [],

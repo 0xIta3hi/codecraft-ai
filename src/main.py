@@ -179,7 +179,7 @@ class Orchestrator:
                 context.repo,
                 context.pr_number
             )
-            if not pr_details or not pr_details.get("id"):
+            if not pr_details or not pr_details.get("number"):
                 self.logger.warning("Not a valid PR")
                 comment = f"❌ PR #{context.pr_number} does not exist or is not accessible."
                 github.post_comment(context.owner, context.repo, context.pr_number, comment)
@@ -233,7 +233,7 @@ class Orchestrator:
 
             # Step 4: Analyze and generate fixes
             self.logger.info("Step 4: Analyzing and generating fixes")
-            fixes = writer.analyze_and_fix(pr_diff)
+            fixes = writer.analyze_and_fix(pr_diff, context.repo_path)
             output["fixes_found"] = len(fixes) > 0
             output["fixes"] = fixes
 
@@ -259,9 +259,12 @@ class Orchestrator:
             for fix in fixes:
                 file_path = fix.get("file_path")
                 new_code = fix.get("new_code")
+                
+                # Construct full path to file within the repository
+                full_file_path = os.path.join(context.repo_path, file_path)
 
-                self.logger.info("Applying fix", file=file_path)
-                verify_success, error_logs = writer.apply_fix_and_verify(file_path, new_code)
+                self.logger.info("Applying fix", file=file_path, full_path=full_file_path)
+                verify_success, error_logs = writer.apply_fix_and_verify(full_file_path, new_code)
 
                 if verify_success:
                     self.logger.info("Fix verified successfully", file=file_path)

@@ -1,63 +1,88 @@
 {
-  "timestamp": "2025-11-30T09:41:50.789522",
+  "timestamp": "2025-11-30T10:55:01.176273",
   "results": [
     {
-      "success": false,
-      "command": "test",
+      "success": true,
+      "command": "fix",
       "output": {
+        "pr_valid": true,
         "pr_details": {
-          "number": 1,
-          "title": "master branch commit",
-          "description": "Test pull request.",
-          "state": "closed",
+          "number": 2,
+          "title": "commiting bug zoo dataset",
+          "description": "This does have some buggy files, yet i am pushing it to prod. LoL",
+          "state": "open",
           "author": "0xIta3hi",
-          "created_at": "2025-11-29T10:04:11+00:00",
-          "updated_at": "2025-11-29T12:32:35+00:00",
+          "created_at": "2025-11-30T04:25:02+00:00",
+          "updated_at": "2025-11-30T05:23:34+00:00",
           "head_ref": "master",
           "base_ref": "test-feature",
           "commits": 1,
-          "additions": 0,
+          "additions": 392,
           "deletions": 0,
-          "changed_files": 1,
-          "url": "https://github.com/0xIta3hi/codecraft-test/pull/1",
-          "mergeable": null,
+          "changed_files": 6,
+          "url": "https://github.com/0xIta3hi/codecraft-test/pull/2",
+          "mergeable": true,
           "draft": false
         },
-        "changed_files_count": 1,
-        "generated_test_cases": 1,
-        "test_cases": [
+        "diff_size": 15173,
+        "changed_files": [
           {
-            "file": "tests/test_master.py",
-            "target_file": "master.md",
-            "test_code": "import os\n\nimport pytest\n\n\ndef test_master_md_exists():\n    \"\"\"Tests that the master.md file exists.\"\"\"\n    assert os.path.exists('master.md')\n\n\ndef test_master_md_not_empty():\n    \"\"\"Tests that the master.md file is not empty.\"\"\"\n    assert os.path.getsize('master.md') > 0, \"master.md should not be empty\"\n\n\ndef test_master_md_is_readable():\n    \"\"\"Tests that master.md is readable.\"\"\"\n    try:\n        with open('master.md', 'r') as f:\n            f.read()\n    except Exception as e:\n        pytest.fail(f\"Failed to read master.md: {e}\")",
-            "description": "Basic tests to ensure the master.md file exists, is not empty, and is readable.",
-            "imports": [
-              "os",
-              "pytest"
-            ]
+            "filename": "calc.py",
+            "status": "added",
+            "additions": 24,
+            "deletions": 0,
+            "changes": 24,
+            "patch": "@@ -0,0 +1,24 @@\n+\"\"\"\n+calc.py - Module with a logic error: Division by Zero\n+\n+This module contains a function that calculates the average of a list of numbers.\n+The bug: The function doesn't handle empty lists and will crash with ZeroDivisionError.\n+\"\"\"\n+\n+\n+def calculate_average(numbers):\n+    \"\"\"\n+    Calculate the average of a list of numbers.\n+    \n+    Args:\n+        numbers: A list of numeric values\n+        \n+    Returns:\n+        The average of the numbers as a float\n+        \n+    Raises:\n+        ZeroDivisionError: When the list is empty (this is the bug!)\n+    \"\"\"\n+    total = sum(numbers)\n+    count = len(numbers)\n+    return total / count  # Bug: No check for empty list, crashes when count == 0"
+          },
+          {
+            "filename": "list_processor.py",
+            "status": "added",
+            "additions": 80,
+            "deletions": 0,
+            "changes": 80,
+            "patch": "@@ -0,0 +1,80 @@\n+\"\"\"\n+list_processor.py - Module with a subtle off-by-one error\n+\n+This module processes lists and performs operations on their elements.\n+The bug: Loop boundary is off by one, skipping the last element or accessing beyond bounds.\n+\"\"\"\n+\n+\n+def remove_duplicates_preserve_order(items):\n+    \"\"\"\n+    Remove duplicate items from a list while preserving order.\n+    \n+    Args:\n+        items: A list of items\n+        \n+    Returns:\n+        A new list with duplicates removed, order preserved\n+        \n+    Bug: Off-by-one error in the range - skips the last item!\n+    \"\"\"\n+    seen = set()\n+    result = []\n+    \n+    # Bug: range(len(items) - 1) skips the last element!\n+    # Should be: range(len(items))\n+    for i in range(len(items) - 1):\n+        item = items[i]\n+        if item not in seen:\n+            seen.add(item)\n+            result.append(item)\n+    \n+    return result\n+\n+\n+def calculate_moving_average(values, window_size):\n+    \"\"\"\n+    Calculate moving average of a list with a given window size.\n+    \n+    Args:\n+        values: List of numeric values\n+        window_size: Size of the moving window\n+        \n+    Returns:\n+        List of moving averages\n+        \n+    Bug: Off-by-one error causes incorrect window calculation\n+    \"\"\"\n+    if window_size <= 0 or window_size > len(values):\n+        raise ValueError(\"Invalid window size\")\n+    \n+    averages = []\n+    \n+    # Bug: This should be range(len(values) - window_size + 1)\n+    # The current code either misses the last window or crashes\n+    for i in range(len(values) - window_size):\n+        window = values[i:i + window_size]\n+        avg = sum(window) / len(window)\n+        averages.append(avg)\n+    \n+    return averages\n+\n+\n+def extract_subsequence(sequence, start, end):\n+    \"\"\"\n+    Extract a subsequence from a list using start and end indices.\n+    \n+    Args:\n+        sequence: The source list\n+        start: Start index (inclusive)\n+        end: End index (should be inclusive in this API)\n+        \n+    Returns:\n+        The subsequence from start to end (inclusive)\n+        \n+    Bug: Uses exclusive end index when API should use inclusive\n+    \"\"\"\n+    # Bug: Off-by-one error - end index is exclusive but should be inclusive\n+    # Users expect extract_subsequence([1,2,3,4,5], 1, 3) to return [2, 3, 4]\n+    # But it returns [2, 3] due to Python's default exclusive end\n+    return sequence[start:end]"
+          },
+          {
+            "filename": "shell_executor.py",
+            "status": "added",
+            "additions": 56,
+            "deletions": 0,
+            "changes": 56,
+            "patch": "@@ -0,0 +1,56 @@\n+\"\"\"\n+shell_executor.py - Module with a security flaw: Command Injection\n+\n+This module executes shell commands based on user input.\n+The bug: The function doesn't sanitize user input, allowing command injection attacks.\n+\"\"\"\n+\n+import subprocess\n+import os\n+\n+\n+def execute_file_operation(operation, filename):\n+    \"\"\"\n+    Execute a file operation (copy, delete, list) on a specified file.\n+    \n+    Args:\n+        operation: The operation to perform ('copy', 'delete', 'list')\n+        filename: The target filename (UNSANITIZED - SECURITY FLAW!)\n+        \n+    Returns:\n+        The output of the command as a string\n+        \n+    Security Issue: User input is directly interpolated into shell command.\n+                   An attacker could inject shell commands via filename parameter.\n+    \"\"\"\n+    if operation == \"copy\":\n+        # Bug: filename is not sanitized, allows command injection\n+        cmd = f\"copy {filename} {filename}.backup\"\n+    elif operation == \"delete\":\n+        cmd = f\"del {filename}\"\n+    elif operation == \"list\":\n+        cmd = f\"dir {filename}\"\n+    else:\n+        raise ValueError(f\"Unknown operation: {operation}\")\n+    \n+    # Executing unsanitized user input in shell\n+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)\n+    return result.stdout\n+\n+\n+def get_file_info(filename):\n+    \"\"\"\n+    Retrieve file information using shell command.\n+    \n+    Args:\n+        filename: The file to get info on (UNSANITIZED - SECURITY FLAW!)\n+        \n+    Returns:\n+        File information as a string\n+        \n+    Security Issue: Directly concatenates user input into shell command.\n+    \"\"\"\n+    # Bug: Vulnerable to injection - user can pass \"; rm -rf /\" or similar\n+    cmd = f\"powershell -Command \\\"Get-Item '{filename}' | Select-Object FullName, Length\\\"\"\n+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)\n+    return result.stdout"
+          },
+          {
+            "filename": "test_calc.py",
+            "status": "added",
+            "additions": 35,
+            "deletions": 0,
+            "changes": 35,
+            "patch": "@@ -0,0 +1,35 @@\n+\"\"\"\n+test_calc.py - Test suite for calc.py\n+\n+Tests the calculate_average function, including edge cases.\n+Tests WILL FAIL with the current buggy code.\n+\"\"\"\n+\n+import pytest\n+from calc import calculate_average\n+\n+\n+def test_calculate_average_normal_case():\n+    \"\"\"Test average calculation with normal input.\"\"\"\n+    result = calculate_average([1, 2, 3, 4, 5])\n+    assert result == 3.0\n+\n+\n+def test_calculate_average_single_element():\n+    \"\"\"Test average calculation with a single element.\"\"\"\n+    result = calculate_average([42])\n+    assert result == 42.0\n+\n+\n+def test_calculate_average_empty_list():\n+    \"\"\"Test that empty list returns 0.0 instead of crashing.\"\"\"\n+    # This test FAILS with current code (ZeroDivisionError)\n+    # It should return 0.0 or raise ValueError with proper message\n+    result = calculate_average([])\n+    assert result == 0.0\n+\n+\n+def test_calculate_average_negative_numbers():\n+    \"\"\"Test average calculation with negative numbers.\"\"\"\n+    result = calculate_average([-10, -5, 0, 5, 10])\n+    assert result == 0.0"
+          },
+          {
+            "filename": "test_list_processor.py",
+            "status": "added",
+            "additions": 117,
+            "deletions": 0,
+            "changes": 117,
+            "patch": "@@ -0,0 +1,117 @@\n+\"\"\"\n+test_list_processor.py - Test suite for list_processor.py\n+\n+Tests list processing functions that have off-by-one errors.\n+Tests WILL FAIL with the current buggy code.\n+\"\"\"\n+\n+import pytest\n+from list_processor import (\n+    remove_duplicates_preserve_order,\n+    calculate_moving_average,\n+    extract_subsequence\n+)\n+\n+\n+class TestRemoveDuplicates:\n+    \"\"\"Test cases for remove_duplicates_preserve_order function.\"\"\"\n+    \n+    def test_remove_duplicates_simple(self):\n+        \"\"\"Test removing duplicates from simple list.\"\"\"\n+        result = remove_duplicates_preserve_order([1, 2, 2, 3, 1, 4])\n+        assert result == [1, 2, 3, 4], \"Should remove all duplicates\"\n+    \n+    def test_remove_duplicates_preserves_order(self):\n+        \"\"\"Test that order is preserved when removing duplicates.\"\"\"\n+        result = remove_duplicates_preserve_order([3, 1, 2, 1, 3])\n+        assert result == [3, 1, 2], \"Should preserve original order\"\n+    \n+    def test_remove_duplicates_last_element_not_skipped(self):\n+        \"\"\"Test that the last element is NOT skipped (this fails with bug).\"\"\"\n+        # Bug: off-by-one causes last element to be skipped\n+        result = remove_duplicates_preserve_order([1, 2, 3, 4, 5])\n+        assert result == [1, 2, 3, 4, 5], \"Should include all elements including last\"\n+        assert len(result) == 5, \"All 5 elements should be present\"\n+    \n+    def test_remove_duplicates_duplicate_at_end(self):\n+        \"\"\"Test with duplicate at the end (definitely gets skipped with bug).\"\"\"\n+        result = remove_duplicates_preserve_order([1, 2, 3, 2])\n+        assert result == [1, 2, 3], \"Should include and deduplicate the last element\"\n+        assert 2 not in result[2:], \"Last duplicate should be removed\"\n+    \n+    def test_remove_duplicates_single_element(self):\n+        \"\"\"Test with single element list.\"\"\"\n+        result = remove_duplicates_preserve_order([42])\n+        assert result == [42], \"Single element should be preserved\"\n+    \n+    def test_remove_duplicates_empty_list(self):\n+        \"\"\"Test with empty list.\"\"\"\n+        result = remove_duplicates_preserve_order([])\n+        assert result == [], \"Empty list should return empty\"\n+\n+\n+class TestMovingAverage:\n+    \"\"\"Test cases for calculate_moving_average function.\"\"\"\n+    \n+    def test_moving_average_simple(self):\n+        \"\"\"Test moving average with simple values.\"\"\"\n+        values = [1, 2, 3, 4, 5]\n+        result = calculate_moving_average(values, 2)\n+        expected = [1.5, 2.5, 3.5, 4.5]  # All windows of size 2\n+        assert result == expected, \"Should calculate all moving averages\"\n+    \n+    def test_moving_average_includes_last_window(self):\n+        \"\"\"Test that the last valid window is included (fails with bug).\"\"\"\n+        values = [10, 20, 30, 40]\n+        result = calculate_moving_average(values, 2)\n+        # Should have 3 windows: [10,20], [20,30], [30,40]\n+        assert len(result) == 3, \"Should have 3 windows for 4 values with window size 2\"\n+        assert result[-1] == 35.0, \"Last window average should be 35\"\n+    \n+    def test_moving_average_window_size_1(self):\n+        \"\"\"Test with window size of 1.\"\"\"\n+        values = [5, 10, 15]\n+        result = calculate_moving_average(values, 1)\n+        assert result == [5.0, 10.0, 15.0], \"Window size 1 should return all values\"\n+    \n+    def test_moving_average_correct_count(self):\n+        \"\"\"Test that the correct number of windows is returned.\"\"\"\n+        values = [1, 2, 3, 4, 5, 6]\n+        window_size = 3\n+        result = calculate_moving_average(values, window_size)\n+        # For n=6 and window=3, should have 6-3+1=4 windows\n+        assert len(result) == 4, \"Should have 4 windows\"\n+        assert result == [2.0, 3.0, 4.0, 5.0]\n+\n+\n+class TestExtractSubsequence:\n+    \"\"\"Test cases for extract_subsequence function.\"\"\"\n+    \n+    def test_extract_subsequence_inclusive_end(self):\n+        \"\"\"Test that end index is inclusive (API expectation).\"\"\"\n+        sequence = [1, 2, 3, 4, 5]\n+        # API should be inclusive on both ends\n+        result = extract_subsequence(sequence, 1, 3)\n+        # Expected: elements at indices 1, 2, 3 = [2, 3, 4]\n+        assert result == [2, 3, 4], \"End index should be inclusive\"\n+    \n+    def test_extract_subsequence_full_range(self):\n+        \"\"\"Test extracting the full range.\"\"\"\n+        sequence = [10, 20, 30, 40, 50]\n+        result = extract_subsequence(sequence, 0, 4)\n+        assert result == [10, 20, 30, 40, 50], \"Should include all elements with inclusive end\"\n+    \n+    def test_extract_subsequence_single_element(self):\n+        \"\"\"Test extracting a single element.\"\"\"\n+        sequence = [1, 2, 3, 4, 5]\n+        result = extract_subsequence(sequence, 2, 2)\n+        assert result == [3], \"Should extract single element at index 2\"\n+    \n+    def test_extract_subsequence_start_to_end(self):\n+        \"\"\"Test various subsequence extractions.\"\"\"\n+        sequence = ['a', 'b', 'c', 'd', 'e']\n+        \n+        # Extract indices 1 to 3 (inclusive)\n+        result = extract_subsequence(sequence, 1, 3)\n+        assert result == ['b', 'c', 'd'], \"Should extract ['b', 'c', 'd']\"\n+        assert len(result) == 3, \"Should have 3 elements\""
+          },
+          {
+            "filename": "test_shell_executor.py",
+            "status": "added",
+            "additions": 80,
+            "deletions": 0,
+            "changes": 80,
+            "patch": "@@ -0,0 +1,80 @@\n+\"\"\"\n+test_shell_executor.py - Test suite for shell_executor.py\n+\n+Tests file operation functions with security validation.\n+Tests WILL FAIL or expose vulnerabilities with the current buggy code.\n+\"\"\"\n+\n+import pytest\n+import tempfile\n+import os\n+from pathlib import Path\n+from shell_executor import execute_file_operation, get_file_info\n+\n+\n+@pytest.fixture\n+def temp_file():\n+    \"\"\"Create a temporary test file.\"\"\"\n+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:\n+        f.write(\"test content\")\n+        temp_path = f.name\n+    yield temp_path\n+    # Cleanup\n+    if os.path.exists(temp_path):\n+        os.remove(temp_path)\n+    backup_path = f\"{temp_path}.backup\"\n+    if os.path.exists(backup_path):\n+        os.remove(backup_path)\n+\n+\n+def test_execute_file_operation_copy(temp_file):\n+    \"\"\"Test that file copy operation works correctly.\"\"\"\n+    result = execute_file_operation(\"copy\", temp_file)\n+    # After copy, backup file should exist\n+    backup_path = f\"{temp_file}.backup\"\n+    assert os.path.exists(backup_path), \"Backup file should be created\"\n+\n+\n+def test_execute_file_operation_sanitized_input(temp_file):\n+    \"\"\"Test that filenames with special characters are handled safely.\"\"\"\n+    # This test validates that dangerous characters don't execute\n+    # With unsanitized input, this could execute arbitrary commands\n+    malicious_filename = f\"{temp_file}' & echo 'INJECTION'\"\n+    \n+    # Attempting injection should fail gracefully or be blocked\n+    with pytest.raises((FileNotFoundError, OSError)):\n+        execute_file_operation(\"copy\", malicious_filename)\n+\n+\n+def test_get_file_info_requires_sanitization(temp_file):\n+    \"\"\"Test that file info function properly sanitizes input.\"\"\"\n+    # Current code is vulnerable to injection\n+    # Safe code should handle or reject special characters\n+    \n+    # This should work with legitimate filenames\n+    result = get_file_info(temp_file)\n+    assert len(result) > 0, \"File info should be returned for valid file\"\n+    \n+    # Test with injection attempt\n+    malicious_input = f\"{temp_file}'; cmd /c calc; echo '\"\n+    # Should either handle gracefully or raise an error\n+    with pytest.raises((FileNotFoundError, OSError, ValueError)):\n+        get_file_info(malicious_input)\n+\n+\n+def test_execute_file_operation_with_spaces_in_filename(temp_file):\n+    \"\"\"Test that filenames with spaces are handled correctly.\"\"\"\n+    # Create a file with spaces in the name\n+    spaces_file = temp_file.replace('.txt', ' with spaces.txt')\n+    with open(spaces_file, 'w') as f:\n+        f.write(\"test\")\n+    \n+    try:\n+        # Should handle spaces correctly\n+        result = execute_file_operation(\"copy\", spaces_file)\n+        assert os.path.exists(f\"{spaces_file}.backup\")\n+    finally:\n+        if os.path.exists(spaces_file):\n+            os.remove(spaces_file)\n+        if os.path.exists(f\"{spaces_file}.backup\"):\n+            os.remove(f\"{spaces_file}.backup\")"
           }
         ],
-        "written_test_files": [
-          "tests/test_master.py"
-        ],
-        "test_results": {
-          "passed": false,
-          "return_code": 1,
-          "stdout": "                [ 33%]\ntests\\test_master.py::test_master_md_not_empty FAILED                    [ 66%]\ntests\\test_master.py::test_master_md_is_readable FAILED                  [100%]\n\n================================== FAILURES ===================================\n____________________________ test_master_md_exists ____________________________\ntests\\test_master.py:12: in test_master_md_exists\n    assert os.path.exists('master.md')\nE   AssertionError: assert False\nE    +  where False = <built-in function _path_exists>('master.md')\nE    +    where <built-in function _path_exists> = <module 'ntpath' (frozen)>.exists\nE    +      where <module 'ntpath' (frozen)> = os.path\n__________________________ test_master_md_not_empty ___________________________\ntests\\test_master.py:17: in test_master_md_not_empty\n    assert os.path.getsize('master.md') > 0, \"master.md should not be empty\"\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n<frozen genericpath>:86: in getsize\n    ???\nE   FileNotFoundError: [WinError 2] The system cannot find the file specified: 'master.md'\n_________________________ test_master_md_is_readable __________________________\ntests\\test_master.py:23: in test_master_md_is_readable\n    with open('master.md', 'r') as f:\n         ^^^^^^^^^^^^^^^^^^^^^^\nE   FileNotFoundError: [Errno 2] No such file or directory: 'master.md'\n\nDuring handling of the above exception, another exception occurred:\ntests\\test_master.py:26: in test_master_md_is_readable\n    pytest.fail(f\"Failed to read master.md: {e}\")\nE   Failed: Failed to read master.md: [Errno 2] No such file or directory: 'master.md'\n=========================== short test summary info ===========================\nFAILED tests\\test_master.py::test_master_md_exists - AssertionError: assert F...\nFAILED tests\\test_master.py::test_master_md_not_empty - FileNotFoundError: [W...\nFAILED tests\\test_master.py::test_master_md_is_readable - Failed: Failed to r...\n============================== 3 failed in 0.18s ==============================\n",
-          "stderr": ""
-        },
-        "comment_posted": {
-          "id": 3592175749,
-          "body": "### \ud83d\udccb Test Generation\n\nGenerated 1 new test case(s):\n\n**Test 1:** Basic tests to ensure the master.md file exists, is not empty, and is readable.\n- **File:** `tests/test_master.py`\n- **Targets:** `master.md`\n\n_Generated by CodeCraft AI TestAgent_\n\n\n## FAILED Test Results\n\n```\n                [ 33%]\ntests\\test_master.py::test_master_md_not_empty FAILED                    [ 66%]\ntests\\test_master.py::test_master_md_is_readable FAILED                  [100%]\n\n================================== FAILURES ===================================\n____________________________ test_master_md_exists ____________________________\ntests\\test_master.py:12: in test_master_md_exists\n    assert os.path.exists('master.md')\nE   AssertionError: assert False\nE    +  where False = <built-in function _path_exists>('master.md')\nE    +    where <built-in function _path_exists> = <module 'ntpath' (frozen)>.exists\nE    +      where <module 'ntpath' (frozen)> = os.path\n__________________________ test_master_md_not_empty ___________________________\ntests\\test_master.py:17: in test_master_md_not_empty\n    assert os.path.getsize('master.md') > 0, \"master.md should not be empty\"\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n<frozen genericpath>:86: in getsize\n    ???\nE   FileNotFoundError: [WinError 2] The system cannot find the file specified: 'master.md'\n_________________________ test_master_md_is_readable __________________________\ntests\\test_master.py:23: in test_master_md_is_readable\n    with open('master.md', 'r') as f:\n         ^^^^^^^^^^^^^^^^^^^^^^\nE   FileNotFoundError: [Errno 2] No such file or directory: 'master.md'\n\nDuring handling of the above exception, another exception occurred:\ntests\\test_master.py:26: in test_master_md_is_readable\n    pytest.fail(f\"Failed to read master.md: {e}\")\nE   Failed: Failed to read master.md: [Errno 2] No such file or directory: 'master.md'\n=========================== short test summary info ===========================\nFAILED tests\\test_master.py::test_master_md_exists - AssertionError: assert F...\nFAILED tests\\test_master.py::test_master_md_not_empty - FileNotFoundError: [W...\nFAILED tests\\test_master.py::test_master_md_is_readable - Failed: Failed to r...\n============================== 3 failed in 0.18s ==============================\n\n```\n\n_Generated by CodeCraft AI_",
-          "author": "0xIta3hi",
-          "created_at": "2025-11-30T04:11:49+00:00",
-          "url": "https://github.com/0xIta3hi/codecraft-test/pull/1#issuecomment-3592175749"
-        }
+        "fixes_found": false,
+        "fixes": [],
+        "comment": "\u2705 Code analysis complete. No issues found that require fixing."
       },
       "error": null,
-      "timestamp": "2025-11-30T09:41:50.789180",
-      "duration_seconds": 14.28835
+      "timestamp": "2025-11-30T10:55:01.175912",
+      "duration_seconds": 14.022483
     }
   ],
-  "final_status": "failure"
+  "final_status": "success"
 }
