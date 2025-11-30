@@ -369,8 +369,10 @@ class Orchestrator:
 
         try:
             from src.utils.github_helper import GitHubAPIWrapper
+            from src.agents.review import ReviewAgent
 
             github = GitHubAPIWrapper()
+            review_agent = ReviewAgent()
             output = {}
 
             # Step 1: Fetch PR details
@@ -399,15 +401,15 @@ class Orchestrator:
             )
             output["changed_files_count"] = len(changed_files)
 
-            # Step 4: Analyze code with Claude
-            self.logger.info("Step 4: Analyzing code with Claude")
-            review = self._review_code_with_claude(pr_diff, changed_files)
+            # Step 4: Analyze code with ReviewAgent
+            self.logger.info("Step 4: Analyzing code with ReviewAgent")
+            review = review_agent.analyze_code(pr_diff, changed_files)
             output["review"] = review
 
             # Step 5: Post review comment
             if not context.dry_run:
                 self.logger.info("Step 5: Posting review comment")
-                comment = self._generate_review_comment(review)
+                comment = review_agent.generate_review_comment(review)
                 comment_result = github.post_comment(
                     context.owner,
                     context.repo,
@@ -439,7 +441,7 @@ class Orchestrator:
 
     def handle_test_command(self, context: ExecutionContext) -> ExecutionResult:
         """
-        Handle 'test' command: Run tests on the PR.
+        Handle 'test' command: Generate new tests and run existing tests.
 
         Args:
             context: Execution context
@@ -452,9 +454,11 @@ class Orchestrator:
 
         try:
             from src.utils.github_helper import GitHubAPIWrapper
+            from src.agents.test import TestAgent
             import subprocess
 
             github = GitHubAPIWrapper()
+            test_agent = TestAgent()
             output = {}
 
             # Step 1: Fetch PR details
@@ -466,35 +470,64 @@ class Orchestrator:
             )
             output["pr_details"] = pr_details
 
-            # Step 2: Clone/pull repo
-            self.logger.info("Step 2: Setting up repository")
-            if not os.path.exists(context.repo_path):
-                github.clone_repo(
-                    context.owner,
-                    context.repo,
-                    context.repo_path
-                )
-            else:
-                self.logger.info("Repository already exists, pulling latest")
+            # Step 2: Fetch PR diff and files
+            self.logger.info("Step 2: Fetching PR diff and changed files")
+            pr_diff = github.fetch_pr_diff(
+                context.owner,
+                context.repo,
+                context.pr_number
+            )
+            changed_files = github.get_pr_files(
+                context.owner,
+                context.repo,
+                context.pr_number
+            )
+            output["changed_files_count"] = len(changed_files)
 
-            # Step 3: Run tests
-            self.logger.info("Step 3: Running tests")
+            # Step 3: Generate new test cases (autonomous)
+            self.logger.info("Step 3: Generating new test cases")
+            test_cases = test_agent.generate_test_cases(pr_diff, changed_files)
+            output["generated_test_cases"] = len(test_cases)
+            output["test_cases"] = test_cases
+
+            # Step 4: Write generated test files
+            written_tests = []
+            if test_cases and not context.dry_run:
+                self.logger.info("Step 4: Writing generated test files")
+                for test_case in test_cases:
+                    test_file = test_case.get("file")
+                    test_code = test_case.get("test_code")
+                    imports = test_case.get("imports", [])
+                    
+                    if test_file and test_code:
+                        test_path = os.path.join(context.repo_path, test_file)
+                        success = test_agent.write_test_file(test_path, test_code, imports)
+                        if success:
+                            written_tests.append(test_file)
+            
+            output["written_test_files"] = written_tests
+
+            # Step 5: Run all tests
+            self.logger.info("Step 5: Running tests")
             test_result = self._run_tests(context.repo_path)
             output["test_results"] = test_result
 
-            # Step 4: Post results comment
+            # Step 6: Generate and post test report
             if not context.dry_run:
-                self.logger.info("Step 4: Posting test results")
-                comment = self._generate_test_results_comment(test_result)
+                self.logger.info("Step 6: Posting test report")
+                test_report = test_agent.generate_test_report(test_cases)
+                test_results_comment = self._generate_test_results_comment(test_result)
+                full_comment = f"{test_report}\n\n{test_results_comment}"
+                
                 comment_result = github.post_comment(
                     context.owner,
                     context.repo,
                     context.pr_number,
-                    comment
+                    full_comment
                 )
                 output["comment_posted"] = comment_result
             else:
-                self.logger.info("Dry-run mode: Skipping comment")
+                self.logger.info("Dry-run mode: Skipping test file writing and comment")
                 output["dry_run"] = True
 
             duration = (datetime.now() - start_time).total_seconds()
@@ -550,9 +583,9 @@ class Orchestrator:
                 context.pr_number
             )
 
-            # Step 3: Analyze with Claude
+            # Step 3: Analyze with Gemini
             self.logger.info("Step 3: Analyzing code")
-            analysis = self._analyze_code_with_claude(pr_diff, changed_files)
+            analysis = self._analyze_code_with_gemini(pr_diff, changed_files)
             output["analysis"] = analysis
 
             duration = (datetime.now() - start_time).total_seconds()
@@ -631,98 +664,6 @@ class Orchestrator:
             self.logger.error("Gemini analysis failed", error=str(e))
             return {"error": str(e), "summary": "Analysis failed"}
 
-    def _review_code_with_claude(
-        self,
-        diff: str,
-        files: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Review code using Google Gemini API"""
-        try:
-            import google.generativeai as genai
-
-            api_key = os.getenv("GEMINI_API_KEY")
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.0-flash")
-
-            prompt = f"""
-            Perform a code review on this pull request.
-            
-            Files changed: {len(files)}
-            {json.dumps(files, indent=2)}
-            
-            Diff (first 4000 chars):
-            {diff[:4000]}
-            
-            Provide a detailed code review with:
-            1. Positive aspects
-            2. Issues to fix
-            3. Suggestions for improvement
-            4. Overall recommendation (approve/request changes)
-            
-            Format as structured feedback.
-            """
-
-            response = model.generate_content(prompt)
-            review_text = response.text
-
-            return {
-                "review": review_text,
-                "model": "gemini-1.5-pro",
-                "usage": {
-                    "input_tokens": response.usage_metadata.prompt_token_count,
-                    "output_tokens": response.usage_metadata.candidates_token_count
-                }
-            }
-
-        except Exception as e:
-            self.logger.error("Gemini review failed", error=str(e))
-            return {"error": str(e), "review": "Review failed"}
-
-    def _generate_fixes(
-        self,
-        analysis: Dict[str, Any],
-        diff: str
-    ) -> List[Dict[str, Any]]:
-        """Generate fixes based on analysis"""
-        try:
-            import google.generativeai as genai
-
-            api_key = os.getenv("GEMINI_API_KEY")
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.0-flash")
-
-            prompt = f"""
-            Based on this code analysis and diff, generate specific fixes.
-            
-            Analysis:
-            {analysis.get('full_analysis', '')}
-            
-            Generate fixes in format:
-            [FIX]
-            File: <filename>
-            Issue: <issue description>
-            Fix: <code fix>
-            [/FIX]
-            
-            Maximum 5 fixes.
-            """
-
-            response = model.generate_content(prompt)
-
-            # Parse response to extract fixes
-            fixes_text = response.text
-            fixes = [
-                {"description": fix.strip()}
-                for fix in fixes_text.split("[FIX]")[1:]
-                if fix.strip()
-            ]
-
-            return fixes
-
-        except Exception as e:
-            self.logger.error("Generate fixes failed", error=str(e))
-            return []
-
     def _run_tests(self, repo_path: str) -> Dict[str, Any]:
         """Run pytest on the repository"""
         try:
@@ -761,13 +702,6 @@ class Orchestrator:
         for i, fix in enumerate(fixes, 1):
             comment += f"- {fix.get('description', 'Fix ' + str(i))}\n"
         comment += "\n_Generated by CodeCraft AI_"
-        return comment
-
-    def _generate_review_comment(self, review: Dict[str, Any]) -> str:
-        """Generate a review comment"""
-        comment = "## Code Review\n\n"
-        comment += review.get('review', 'Review completed')
-        comment += "\n\n_Generated by CodeCraft AI_"
         return comment
 
     def _generate_test_results_comment(self, results: Dict[str, Any]) -> str:
